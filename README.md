@@ -1,64 +1,64 @@
 # GCP Audio Transcriber
 
-A simple Python tool to convert any audio file (short or long) into text using Google Cloud Platform's Speech-to-Text API. It handles file uploads to GCS automatically for long-form audio processing.
+A robust Python toolset to convert audio into text using Google Cloud Platform's Speech-to-Text API. Supports both file-based (batch) and live (streaming) transcription.
+
+## ⚠️ Audio Format Notice
+**GCP is strictly optimized for WAV (Linear16) files.**
+* **MP3 Files:** `transcribe_file.py` will automatically convert them to the correct WAV format using `ffmpeg`.
+* **Manual WAVs:** If you provide your own WAV, ensure it is **16kHz, Mono**.
 
 ## ☁️ GCP Setup
 
-1.  **GCP Account**: Ensure you have a Google Cloud Platform account with **Billing Enabled**.
-2.  **Enable API**: Search for and enable the **Cloud Speech-to-Text API**.
-3.  **Storage**: Create a **Cloud Storage Bucket** (e.g., `bwai-stt-audio`).
-4.  **Credentials**:
-    * Create a **Service Account** with *Storage Admin* and *Cloud Speech Client* roles.
-    * Download the key as `key.json`.
-    * Convert the key to a base64 string for your environment variables:
-        ```bash
-        cat key.json | base64 -w 0
-        ```
+1.  **Project:** Create a Google Cloud Project with Billing Enabled.
+2.  **API:** Enable "Cloud Speech-to-Text API".
+3.  **Storage:** Create a Bucket (e.g., `bwai-stt-audio`).
+4.  **Auth:** * Create a Service Account with **Storage Admin** and **Cloud Speech Client** roles.
+    * Download `key.json`.
+    * Convert to base64: `cat key.json | base64 -w 0`
 
-## ⚙️ Configuration
+## ⚙️ Installation
 
-Create a `.env` file in the root directory:
+1.  **System Requirements (Required for conversion):**
+    * **Ubuntu/Debian:** `sudo apt install ffmpeg portaudio19-dev`
+    * **Arch:** `sudo pacman -S ffmpeg`
+    * **Mac:** `brew install ffmpeg portaudio`
 
-```env
-GOOGLE_BUCKET_NAME=your-bucket-name
-GOOGLE_CREDENTIALS_BASE64=your_base64_string_here
+2.  **Python Dependencies:**
+    ```bash
+    uv sync
+    # Or manually:
+    uv add google-cloud-speech google-cloud-storage python-dotenv pyaudio
+    ```
 
-```
-
-## 🚀 Installation
-
-This project uses `uv` for dependency management.
-
-```bash
-uv sync
-
-```
+3.  **Configuration (.env):**
+    ```env
+    GOOGLE_BUCKET_NAME=your-bucket-name
+    GOOGLE_CREDENTIALS_BASE64=your_base64_string_here
+    ```
 
 ## 🏃‍♂️ Usage
 
-Run the script by providing the path to your audio file.
-
-**Test with a sample:**
-
-```bash
-uv run main.py test/sample.wav
-
-```
-
-**Run on any file:**
+### 1. File Transcription (Recommended)
+Best for accuracy and long recordings. Automatically handles MP3->WAV conversion.
 
 ```bash
-uv run main.py path/to/your/audio.mp3
+uv run transcribe_file.py my_podcast.mp3
 
 ```
 
-The script will:
+* **Output:** Prints text to console and saves `my_podcast.mp3.txt`.
+* **Features:** Speaker Detection, Auto-Cleanup of Cloud Storage.
 
-1. Upload the audio to your GCS bucket.
-2. Transcribe it using the LongRunningRecognize method.
-3. Print the text and save it to a `.txt` file.
+### 2. Live Transcription
+
+Listens to your microphone in real-time.
+
+```bash
+uv run transcribe_live.py
 
 ```
 
-### Next Step
-Since you are using `uv`, would you like me to generate the `pyproject.toml` file content as well to ensure the dependencies (`google-cloud-speech`, `google-cloud-storage`, `python-dotenv`) are defined correctly?
+* **Limit:** Google restricts live streams to ~5 minutes per session.
+* **Note:** Speaker detection is available but less stable than file mode.
+
+```
