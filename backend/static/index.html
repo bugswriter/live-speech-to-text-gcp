@@ -5,284 +5,962 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Meeting Notes</title>
     <style>
+        :root {
+            --primary: #4CAF50;
+            --primary-dark: #388E3C;
+            --danger: #f44336;
+            --info: #2196F3;
+            --warning: #ff9800;
+            --pink: #e91e63;
+            --sidebar-width: 280px;
+            --header-height: 60px;
+        }
+        
         * { box-sizing: border-box; margin: 0; padding: 0; }
+        
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             line-height: 1.6;
-            max-width: 900px;
-            margin: 0 auto;
+            background: #f5f5f5;
+            min-height: 100vh;
+        }
+        
+        /* ===== Layout ===== */
+        .app-container {
+            display: flex;
+            min-height: 100vh;
+        }
+        
+        /* ===== Sidebar ===== */
+        .sidebar {
+            width: var(--sidebar-width);
+            background: white;
+            border-right: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            z-index: 100;
+        }
+        
+        .sidebar-header {
             padding: 20px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .sidebar-header h1 {
+            font-size: 18px;
+            color: #333;
+            margin-bottom: 15px;
+        }
+        
+        .btn-new-meeting {
+            width: 100%;
+            padding: 12px 16px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: background 0.2s;
+        }
+        
+        .btn-new-meeting:hover {
+            background: var(--primary-dark);
+        }
+        
+        .meetings-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+        
+        .meetings-list-header {
+            font-size: 12px;
+            text-transform: uppercase;
+            color: #999;
+            padding: 10px;
+            font-weight: 600;
+        }
+        
+        .meeting-item {
+            padding: 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-bottom: 4px;
+            transition: background 0.2s;
+        }
+        
+        .meeting-item:hover {
             background: #f5f5f5;
         }
+        
+        .meeting-item.active {
+            background: #e8f5e9;
+            border-left: 3px solid var(--primary);
+        }
+        
+        .meeting-item-title {
+            font-weight: 500;
+            color: #333;
+            font-size: 14px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .meeting-item-meta {
+            font-size: 12px;
+            color: #999;
+            margin-top: 4px;
+            display: flex;
+            justify-content: space-between;
+        }
+        
+        .meeting-item-status {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ccc;
+            margin-right: 6px;
+        }
+        
+        .meeting-item-status.active {
+            background: var(--primary);
+            animation: pulse 1.5s infinite;
+        }
+        
+        .empty-meetings {
+            text-align: center;
+            padding: 40px 20px;
+            color: #999;
+        }
+        
+        /* ===== Main Content ===== */
+        .main-content {
+            flex: 1;
+            margin-left: var(--sidebar-width);
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        
+        /* ===== Header ===== */
+        .main-header {
+            height: var(--header-height);
+            background: white;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            align-items: center;
+            padding: 0 24px;
+            gap: 16px;
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+        
+        .meeting-title-input {
+            flex: 1;
+            font-size: 18px;
+            font-weight: 500;
+            border: none;
+            outline: none;
+            padding: 8px 12px;
+            border-radius: 4px;
+            background: transparent;
+            transition: background 0.2s;
+        }
+        
+        .meeting-title-input:hover,
+        .meeting-title-input:focus {
+            background: #f5f5f5;
+        }
+        
         .controls {
             display: flex;
             gap: 10px;
             align-items: center;
-            margin-bottom: 20px;
-            padding: 15px;
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        button {
+        
+        .btn {
             padding: 10px 20px;
             border: none;
-            border-radius: 5px;
+            border-radius: 6px;
             cursor: pointer;
             font-size: 14px;
+            font-weight: 500;
             transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
-        .btn-record { background: #4CAF50; color: white; }
-        .btn-record:hover { background: #45a049; }
-        .btn-record.recording { background: #f44336; animation: pulse 1s infinite; }
-        .btn-stop { background: #666; color: white; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
         
-        .status { flex: 1; text-align: right; color: #666; font-size: 14px; }
-        .status.processing { color: #2196F3; }
+        .btn-record {
+            background: var(--primary);
+            color: white;
+        }
         
-        #meeting-container {
+        .btn-record:hover {
+            background: var(--primary-dark);
+        }
+        
+        .btn-record.recording {
+            background: var(--danger);
+            animation: pulse 1s infinite;
+        }
+        
+        .btn-stop {
+            background: #666;
+            color: white;
+        }
+        
+        .btn-stop:hover {
+            background: #555;
+        }
+        
+        .btn-stop:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .btn-delete {
+            background: transparent;
+            color: var(--danger);
+            padding: 8px 12px;
+        }
+        
+        .btn-delete:hover {
+            background: #ffebee;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        
+        .status-badge {
+            font-size: 13px;
+            color: #666;
+            padding: 6px 12px;
+            background: #f5f5f5;
+            border-radius: 20px;
+        }
+        
+        .status-badge.recording {
+            background: #ffebee;
+            color: var(--danger);
+        }
+        
+        /* ===== Meeting Content ===== */
+        .meeting-content {
+            flex: 1;
+            padding: 24px;
+            max-width: 900px;
+            margin: 0 auto;
+            width: 100%;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 80px 20px;
+            color: #666;
+        }
+        
+        .empty-state h2 {
+            font-size: 24px;
+            margin-bottom: 10px;
+            color: #333;
+        }
+        
+        .empty-state p {
+            max-width: 400px;
+            margin: 0 auto;
+        }
+        
+        /* ===== Notes Sections ===== */
+        .notes-section {
             background: white;
             border-radius: 8px;
             padding: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
-        .meeting-header { border-bottom: 1px solid #eee; padding-bottom: 15px; margin-bottom: 20px; }
-        .meeting-title { font-size: 24px; outline: none; border: none; width: 100%; }
-        .meeting-title:focus { background: #f9f9f9; }
-        .meeting-meta { color: #666; font-size: 14px; margin-top: 5px; }
         
-        section { margin-bottom: 25px; }
-        section h2 { 
-            font-size: 16px; 
-            color: #333; 
-            margin-bottom: 10px; 
-            padding-bottom: 5px;
-            border-bottom: 2px solid #4CAF50;
+        .notes-section h2 {
+            font-size: 14px;
+            text-transform: uppercase;
+            color: #666;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #e0e0e0;
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
         }
-        .transcript-count { font-weight: normal; color: #999; font-size: 12px; }
+        
+        .notes-section h2 .icon {
+            font-size: 16px;
+        }
+        
+        .section-badge {
+            font-size: 11px;
+            background: #f0f0f0;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: normal;
+        }
+        
+        /* Interim Transcript */
+        .interim-transcript {
+            background: linear-gradient(90deg, #e3f2fd, #bbdefb);
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid var(--info);
+            animation: fadeIn 0.3s;
+        }
+        
+        .interim-transcript .speaker {
+            font-weight: 600;
+            color: #1565c0;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
         
         /* Summary */
-        .summary-content { 
-            color: #444; 
+        .summary-content {
+            color: #444;
             background: #f8f9fa;
-            padding: 15px;
-            border-radius: 5px;
-            border-left: 3px solid #4CAF50;
+            padding: 16px;
+            border-radius: 6px;
+            border-left: 4px solid var(--primary);
+            line-height: 1.7;
         }
-        .summary-content p { margin-bottom: 10px; }
-        .summary-content p:last-child { margin-bottom: 0; }
         
         /* Key Points */
-        .key-points ul { list-style: none; }
-        .key-points li { 
-            padding: 8px 12px;
-            margin: 5px 0;
-            background: #e8f5e9;
-            border-radius: 4px;
-            position: relative;
-            padding-left: 24px;
+        .key-points-list {
+            list-style: none;
         }
-        .key-points li::before {
-            content: "•";
+        
+        .key-points-list li {
+            padding: 10px 12px 10px 28px;
+            margin: 6px 0;
+            background: #e8f5e9;
+            border-radius: 6px;
+            position: relative;
+        }
+        
+        .key-points-list li::before {
+            content: "";
             position: absolute;
-            left: 10px;
-            color: #4CAF50;
-            font-weight: bold;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 6px;
+            height: 6px;
+            background: var(--primary);
+            border-radius: 50%;
         }
         
         /* Decisions */
         .decision-item {
-            padding: 12px;
+            padding: 14px;
             margin: 8px 0;
             background: #e3f2fd;
-            border-radius: 5px;
-            border-left: 3px solid #2196F3;
+            border-radius: 6px;
+            border-left: 4px solid var(--info);
         }
-        .decision-text { font-weight: 500; color: #1565c0; }
-        .decision-rationale { color: #666; font-size: 13px; margin-top: 5px; }
-        .decision-participants { color: #999; font-size: 12px; margin-top: 3px; }
+        
+        .decision-text {
+            font-weight: 500;
+            color: #1565c0;
+        }
+        
+        .decision-rationale {
+            color: #666;
+            font-size: 13px;
+            margin-top: 6px;
+        }
+        
+        .decision-participants {
+            color: #999;
+            font-size: 12px;
+            margin-top: 4px;
+        }
         
         /* Action Items */
-        .action-items ul { list-style: none; }
-        .action-item { 
-            padding: 10px 12px;
-            background: #fff3cd;
-            border-radius: 4px;
-            margin: 5px 0;
-            border-left: 3px solid #ffc107;
+        .action-items-list {
+            list-style: none;
         }
-        .action-task { display: block; }
-        .assignee { 
+        
+        .action-item {
+            padding: 14px;
+            background: #fff8e1;
+            border-radius: 6px;
+            margin: 8px 0;
+            border-left: 4px solid var(--warning);
+        }
+        
+        .action-task {
+            display: block;
+            font-weight: 500;
+        }
+        
+        .assignee {
             display: inline-block;
-            background: #856404;
+            background: #e65100;
             color: white;
-            padding: 2px 8px;
-            border-radius: 3px;
+            padding: 2px 10px;
+            border-radius: 12px;
             font-size: 12px;
-            margin-top: 5px;
+            margin-top: 8px;
         }
-        .action-context { color: #666; font-size: 13px; margin-top: 5px; }
+        
+        .action-context {
+            color: #666;
+            font-size: 13px;
+            margin-top: 6px;
+        }
         
         /* Open Questions */
-        .open-questions ul { list-style: none; }
-        .open-questions li {
-            padding: 8px 12px;
-            margin: 5px 0;
+        .questions-list {
+            list-style: none;
+        }
+        
+        .questions-list li {
+            padding: 10px 14px;
+            margin: 6px 0;
             background: #fce4ec;
-            border-radius: 4px;
-            border-left: 3px solid #e91e63;
+            border-radius: 6px;
+            border-left: 4px solid var(--pink);
             color: #880e4f;
         }
         
         /* Transcript */
-        .transcript-entries { 
-            max-height: 300px; 
+        .transcript-container {
+            max-height: 400px;
             overflow-y: auto;
-            border: 1px solid #eee;
-            border-radius: 4px;
-            padding: 10px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
         }
-        .transcript-entry { 
-            padding: 5px 0; 
-            border-bottom: 1px solid #f0f0f0; 
-        }
-        .transcript-entry:last-child { border-bottom: none; }
-        .transcript-entry .speaker { 
-            font-weight: bold; 
-            color: #333; 
-            margin-right: 5px;
-        }
-        .transcript-entry .text { color: #666; }
         
-        /* Interim transcript (live typing indicator) */
-        .interim-transcript {
-            background: linear-gradient(90deg, #e3f2fd, #bbdefb);
-            padding: 12px 15px;
-            border-radius: 5px;
-            margin-bottom: 15px;
-            font-style: italic;
-            animation: fadeIn 0.3s;
-            border-left: 3px solid #2196F3;
+        .transcript-entry {
+            padding: 12px 16px;
+            border-bottom: 1px solid #f0f0f0;
         }
-        .interim-transcript .speaker { font-weight: bold; color: #1565c0; }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         
-        /* Empty state */
-        .empty-state {
-            text-align: center;
+        .transcript-entry:last-child {
+            border-bottom: none;
+        }
+        
+        .transcript-entry .speaker {
+            font-weight: 600;
+            color: #333;
+            margin-right: 8px;
+        }
+        
+        .transcript-entry .text {
+            color: #555;
+        }
+        
+        .transcript-entry .timestamp {
+            font-size: 11px;
             color: #999;
-            padding: 40px;
+            float: right;
         }
         
-        /* Processing indicator */
+        /* ===== Modal ===== */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.2s;
+        }
+        
+        .modal-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+        
+        .modal {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            width: 90%;
+            max-width: 400px;
+            transform: scale(0.9);
+            transition: transform 0.2s;
+        }
+        
+        .modal-overlay.active .modal {
+            transform: scale(1);
+        }
+        
+        .modal h2 {
+            margin-bottom: 20px;
+            font-size: 20px;
+        }
+        
+        .modal-input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+        
+        .modal-input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+        
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+        
+        .btn-secondary {
+            background: #f5f5f5;
+            color: #333;
+        }
+        
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+        
+        /* ===== Processing Indicator ===== */
         .processing-indicator {
             position: fixed;
-            top: 20px;
+            bottom: 20px;
             right: 20px;
-            background: #2196F3;
+            background: var(--info);
             color: white;
-            padding: 10px 15px;
-            border-radius: 5px;
-            font-size: 13px;
-            animation: slideIn 0.3s;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
             z-index: 1000;
+            animation: slideUp 0.3s;
         }
-        @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+        
+        @keyframes slideUp {
+            from { transform: translateY(100%); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* ===== Responsive ===== */
+        @media (max-width: 768px) {
+            .sidebar {
+                transform: translateX(-100%);
+                transition: transform 0.3s;
+            }
+            
+            .sidebar.open {
+                transform: translateX(0);
+            }
+            
+            .main-content {
+                margin-left: 0;
+            }
+            
+            .menu-toggle {
+                display: block;
+            }
+        }
     </style>
 </head>
 <body>
-    <div class="controls">
-        <button id="recordBtn" class="btn-record">Start Recording</button>
-        <button id="stopBtn" class="btn-stop" disabled>Stop</button>
-        <span id="status" class="status">Ready - Click to start</span>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h1>Meeting Notes</h1>
+                <button class="btn-new-meeting" onclick="showNewMeetingModal()">
+                    <span>+</span> New Meeting
+                </button>
+            </div>
+            <div class="meetings-list">
+                <div class="meetings-list-header">Recent Meetings</div>
+                <div id="meetings-list-content">
+                    <div class="empty-meetings">Loading...</div>
+                </div>
+            </div>
+        </aside>
+        
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="main-header" id="main-header" style="display: none;">
+                <input type="text" class="meeting-title-input" id="meeting-title" placeholder="Meeting Title" />
+                <div class="controls">
+                    <span id="status" class="status-badge">Ready</span>
+                    <button id="recordBtn" class="btn btn-record">Start Recording</button>
+                    <button id="stopBtn" class="btn btn-stop" disabled>Stop</button>
+                    <button id="deleteBtn" class="btn btn-delete" title="Delete meeting">Delete</button>
+                </div>
+            </header>
+            
+            <div class="meeting-content" id="meeting-container">
+                <div class="empty-state" id="empty-state">
+                    <h2>Welcome to Meeting Notes</h2>
+                    <p>Create a new meeting to get started, or select an existing meeting from the sidebar.</p>
+                </div>
+            </div>
+        </main>
     </div>
     
-    <div id="meeting-container">
-        <p class="empty-state">Click "Start Recording" to begin the meeting.<br>Notes will update automatically every 30 seconds.</p>
+    <!-- New Meeting Modal -->
+    <div class="modal-overlay" id="new-meeting-modal">
+        <div class="modal">
+            <h2>New Meeting</h2>
+            <input type="text" class="modal-input" id="new-meeting-title" placeholder="Enter meeting title..." autofocus />
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="hideNewMeetingModal()">Cancel</button>
+                <button class="btn btn-record" onclick="createNewMeeting()">Create Meeting</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Delete Confirmation Modal -->
+    <div class="modal-overlay" id="delete-modal">
+        <div class="modal">
+            <h2>Delete Meeting?</h2>
+            <p style="margin-bottom: 20px; color: #666;">This action cannot be undone. All notes and transcripts will be permanently deleted.</p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="hideDeleteModal()">Cancel</button>
+                <button class="btn" style="background: var(--danger); color: white;" onclick="confirmDelete()">Delete</button>
+            </div>
+        </div>
     </div>
 
     <script src="/static/meeting-client.js"></script>
     <script>
-        // Get or create meeting ID
-        const meetingId = new URLSearchParams(window.location.search).get('id') || 
-                          'meeting-' + Math.random().toString(36).substr(2, 9);
-        
-        if (!window.location.search.includes('id=')) {
-            history.replaceState(null, '', `?id=${meetingId}`);
-        }
-        
-        const renderer = new MeetingNotesRenderer('meeting-container');
+        // State
+        let currentMeetingId = null;
+        let client = null;
+        let renderer = null;
         let lastUpdateTime = null;
         
-        const client = new MeetingClient(
-            meetingId,
-            (meeting) => {
-                renderer.render(meeting);
-                lastUpdateTime = new Date();
-                updateStatus();
-            },
-            (text, speaker) => renderer.showInterimTranscript(text, speaker)
-        );
-        
+        // DOM Elements
+        const meetingsListContent = document.getElementById('meetings-list-content');
+        const meetingContainer = document.getElementById('meeting-container');
+        const emptyState = document.getElementById('empty-state');
+        const mainHeader = document.getElementById('main-header');
+        const meetingTitleInput = document.getElementById('meeting-title');
         const recordBtn = document.getElementById('recordBtn');
         const stopBtn = document.getElementById('stopBtn');
+        const deleteBtn = document.getElementById('deleteBtn');
         const status = document.getElementById('status');
         
-        function updateStatus() {
-            if (!client.isRecording) return;
+        // Initialize
+        document.addEventListener('DOMContentLoaded', async () => {
+            renderer = new MeetingNotesRenderer('meeting-container');
+            await loadMeetingsList();
             
-            const now = new Date();
-            if (lastUpdateTime) {
-                const secAgo = Math.floor((now - lastUpdateTime) / 1000);
-                const nextUpdate = Math.max(0, 30 - secAgo);
-                status.textContent = `Recording... Next AI update in ${nextUpdate}s`;
-            } else {
-                status.textContent = 'Recording... Waiting for first transcript';
+            // Check URL for meeting ID
+            const urlParams = new URLSearchParams(window.location.search);
+            const meetingId = urlParams.get('id');
+            if (meetingId) {
+                await selectMeeting(meetingId);
+            }
+        });
+        
+        // Load meetings list
+        async function loadMeetingsList() {
+            try {
+                const response = await fetch('/api/meetings');
+                const meetings = await response.json();
+                
+                if (meetings.length === 0) {
+                    meetingsListContent.innerHTML = '<div class="empty-meetings">No meetings yet</div>';
+                    return;
+                }
+                
+                meetingsListContent.innerHTML = meetings.map(m => `
+                    <div class="meeting-item ${m.id === currentMeetingId ? 'active' : ''}" 
+                         onclick="selectMeeting('${m.id}')">
+                        <div class="meeting-item-title">
+                            <span class="meeting-item-status ${m.is_active ? 'active' : ''}"></span>
+                            ${escapeHtml(m.title || 'Untitled Meeting')}
+                        </div>
+                        <div class="meeting-item-meta">
+                            <span>${formatDate(m.created_at)}</span>
+                            <span>${m.transcript?.length || 0} entries</span>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Failed to load meetings:', error);
+                meetingsListContent.innerHTML = '<div class="empty-meetings">Failed to load</div>';
             }
         }
         
-        // Update status every second
-        setInterval(updateStatus, 1000);
+        // Select a meeting
+        async function selectMeeting(meetingId) {
+            // Disconnect previous client
+            if (client) {
+                client.disconnect();
+            }
+            
+            currentMeetingId = meetingId;
+            
+            // Update URL
+            history.pushState(null, '', `?id=${meetingId}`);
+            
+            // Show header
+            mainHeader.style.display = 'flex';
+            emptyState.style.display = 'none';
+            
+            // Update sidebar selection
+            document.querySelectorAll('.meeting-item').forEach(el => {
+                el.classList.toggle('active', el.onclick.toString().includes(meetingId));
+            });
+            
+            // Connect to meeting
+            client = new MeetingClient(
+                meetingId,
+                (meeting) => {
+                    renderer.render(meeting);
+                    meetingTitleInput.value = meeting.title || '';
+                    lastUpdateTime = new Date();
+                    updateStatus();
+                },
+                (text, speaker) => renderer.showInterimTranscript(text, speaker)
+            );
+            
+            try {
+                await client.connect();
+                resetRecordingUI();
+            } catch (error) {
+                console.error('Failed to connect:', error);
+                status.textContent = 'Connection failed';
+            }
+        }
         
+        // New Meeting Modal
+        function showNewMeetingModal() {
+            document.getElementById('new-meeting-modal').classList.add('active');
+            document.getElementById('new-meeting-title').value = '';
+            document.getElementById('new-meeting-title').focus();
+        }
+        
+        function hideNewMeetingModal() {
+            document.getElementById('new-meeting-modal').classList.remove('active');
+        }
+        
+        async function createNewMeeting() {
+            const title = document.getElementById('new-meeting-title').value.trim() || 'Untitled Meeting';
+            
+            try {
+                const response = await fetch('/api/meetings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title })
+                });
+                const meeting = await response.json();
+                
+                hideNewMeetingModal();
+                await loadMeetingsList();
+                await selectMeeting(meeting.id);
+            } catch (error) {
+                console.error('Failed to create meeting:', error);
+                alert('Failed to create meeting');
+            }
+        }
+        
+        // Delete Modal
+        function showDeleteModal() {
+            document.getElementById('delete-modal').classList.add('active');
+        }
+        
+        function hideDeleteModal() {
+            document.getElementById('delete-modal').classList.remove('active');
+        }
+        
+        async function confirmDelete() {
+            if (!currentMeetingId) return;
+            
+            try {
+                await fetch(`/api/meetings/${currentMeetingId}`, { method: 'DELETE' });
+                
+                hideDeleteModal();
+                
+                if (client) {
+                    client.disconnect();
+                    client = null;
+                }
+                
+                currentMeetingId = null;
+                mainHeader.style.display = 'none';
+                meetingContainer.innerHTML = '';
+                emptyState.style.display = 'block';
+                meetingContainer.appendChild(emptyState);
+                
+                history.pushState(null, '', window.location.pathname);
+                await loadMeetingsList();
+            } catch (error) {
+                console.error('Failed to delete meeting:', error);
+                alert('Failed to delete meeting');
+            }
+        }
+        
+        // Recording controls
         recordBtn.onclick = async () => {
+            if (!client) return;
+            
             try {
                 status.textContent = 'Connecting...';
+                status.classList.remove('recording');
+                
                 await client.connect();
                 
-                status.textContent = 'Starting recording...';
+                status.textContent = 'Starting...';
                 await client.startRecording();
                 
                 recordBtn.classList.add('recording');
                 recordBtn.textContent = 'Recording...';
                 recordBtn.disabled = true;
                 stopBtn.disabled = false;
-                status.textContent = 'Recording... Waiting for speech';
+                status.textContent = 'Recording';
+                status.classList.add('recording');
+                
+                // Refresh list to show active indicator
+                loadMeetingsList();
             } catch (error) {
                 status.textContent = 'Error: ' + error.message;
                 console.error(error);
             }
         };
         
-        stopBtn.onclick = () => {
+        stopBtn.onclick = async () => {
+            if (!client) return;
+            
             client.stopRecording();
+            resetRecordingUI();
+            status.textContent = 'Processing...';
+            renderer.hideInterimTranscript();
+            
+            setTimeout(() => {
+                status.textContent = 'Saved';
+                loadMeetingsList();
+            }, 2000);
+        };
+        
+        deleteBtn.onclick = showDeleteModal;
+        
+        function resetRecordingUI() {
             recordBtn.classList.remove('recording');
             recordBtn.textContent = 'Start Recording';
             recordBtn.disabled = false;
             stopBtn.disabled = true;
-            status.textContent = 'Recording stopped - Processing final notes...';
-            renderer.hideInterimTranscript();
+            status.textContent = 'Ready';
+            status.classList.remove('recording');
+        }
+        
+        // Title editing
+        let titleTimeout = null;
+        meetingTitleInput.oninput = () => {
+            if (!client) return;
             
-            // Final status after a moment
-            setTimeout(() => {
-                status.textContent = 'Meeting ended';
-            }, 3000);
+            clearTimeout(titleTimeout);
+            titleTimeout = setTimeout(() => {
+                client.updateTitle(meetingTitleInput.value);
+                loadMeetingsList();
+            }, 500);
         };
         
-        window.onbeforeunload = () => client.disconnect();
+        // Status updates
+        function updateStatus() {
+            if (!client?.isRecording) return;
+            
+            const now = new Date();
+            if (lastUpdateTime) {
+                const secAgo = Math.floor((now - lastUpdateTime) / 1000);
+                const nextUpdate = Math.max(0, 30 - secAgo);
+                status.textContent = `Next update: ${nextUpdate}s`;
+            }
+        }
+        setInterval(updateStatus, 1000);
+        
+        // Helpers
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+        
+        function formatDate(dateStr) {
+            if (!dateStr) return '';
+            const date = new Date(dateStr);
+            const now = new Date();
+            const diff = now - date;
+            
+            if (diff < 60000) return 'Just now';
+            if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+            if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+            if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`;
+            
+            return date.toLocaleDateString();
+        }
+        
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                hideNewMeetingModal();
+                hideDeleteModal();
+            }
+            if (e.key === 'Enter' && document.getElementById('new-meeting-modal').classList.contains('active')) {
+                createNewMeeting();
+            }
+        });
+        
+        // Handle Enter in new meeting modal
+        document.getElementById('new-meeting-title').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                createNewMeeting();
+            }
+        });
+        
+        // Cleanup
+        window.onbeforeunload = () => {
+            if (client) client.disconnect();
+        };
     </script>
 </body>
 </html>

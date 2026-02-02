@@ -195,9 +195,27 @@ class MeetingNoteManager:
     def __init__(
         self,
         meeting_id: str,
-        on_state_update: Optional[Callable[[], None]] = None
+        on_state_update: Optional[Callable[[], None]] = None,
+        initial_state: Optional[dict] = None
     ):
-        self.meeting = MeetingNote(id=meeting_id)
+        # Load from initial state if provided (for continuing meetings)
+        if initial_state:
+            self.meeting = MeetingNote(
+                id=meeting_id,
+                title=initial_state.get("title", "Untitled Meeting"),
+                created_at=initial_state.get("created_at", datetime.now().isoformat()),
+                transcript=initial_state.get("transcript", []),
+                summary=initial_state.get("summary", ""),
+                key_points=initial_state.get("key_points", []),
+                action_items=initial_state.get("action_items", []),
+                decisions=initial_state.get("decisions", []),
+                open_questions=initial_state.get("open_questions", []),
+                participants=initial_state.get("participants", []),
+                _previous_summary=initial_state.get("_previous_summary", ""),
+            )
+        else:
+            self.meeting = MeetingNote(id=meeting_id)
+        
         self._transcript_buffer: list[dict] = []
         self._on_state_update = on_state_update
         self._processor: Optional[GeminiProcessor] = None

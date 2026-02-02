@@ -186,27 +186,37 @@ class MeetingNotesRenderer {
     render(meeting) {
         if (!meeting) return;
         
+        // Check if we have any content to show
+        const hasContent = meeting.summary || 
+                          meeting.key_points?.length > 0 || 
+                          meeting.decisions?.length > 0 || 
+                          meeting.action_items?.length > 0 ||
+                          meeting.open_questions?.length > 0 ||
+                          meeting.transcript?.length > 0;
+        
+        if (!hasContent) {
+            this.container.innerHTML = `
+                <div class="empty-state">
+                    <h2>Ready to Record</h2>
+                    <p>Click "Start Recording" to begin capturing the meeting. Notes will be generated automatically every 30 seconds.</p>
+                </div>
+            `;
+            return;
+        }
+        
         this.container.innerHTML = `
             <div class="meeting-notes">
-                <header class="meeting-header">
-                    <h1 contenteditable="true" class="meeting-title">${this._escape(meeting.title)}</h1>
-                    <div class="meeting-meta">
-                        <span class="participants">${meeting.participants?.length > 0 ? meeting.participants.join(', ') : 'No participants yet'}</span>
-                        <span class="timestamp">${new Date(meeting.created_at).toLocaleString()}</span>
-                    </div>
-                </header>
-                
                 ${meeting.summary ? `
-                    <section class="summary">
-                        <h2>Summary</h2>
+                    <section class="notes-section">
+                        <h2><span class="icon">*</span> Summary</h2>
                         <div class="summary-content">${this._formatMultiline(meeting.summary)}</div>
                     </section>
                 ` : ''}
                 
                 ${meeting.key_points?.length > 0 ? `
-                    <section class="key-points">
-                        <h2>Key Points</h2>
-                        <ul>
+                    <section class="notes-section">
+                        <h2><span class="icon">-</span> Key Points <span class="section-badge">${meeting.key_points.length}</span></h2>
+                        <ul class="key-points-list">
                             ${meeting.key_points.map(point => `
                                 <li>${this._escape(point)}</li>
                             `).join('')}
@@ -215,8 +225,8 @@ class MeetingNotesRenderer {
                 ` : ''}
                 
                 ${meeting.decisions?.length > 0 ? `
-                    <section class="decisions">
-                        <h2>Decisions Made</h2>
+                    <section class="notes-section">
+                        <h2><span class="icon">!</span> Decisions <span class="section-badge">${meeting.decisions.length}</span></h2>
                         ${meeting.decisions.map(d => `
                             <div class="decision-item">
                                 <div class="decision-text">${this._escape(d.decision || d)}</div>
@@ -228,9 +238,9 @@ class MeetingNotesRenderer {
                 ` : ''}
                 
                 ${meeting.action_items?.length > 0 ? `
-                    <section class="action-items">
-                        <h2>Action Items</h2>
-                        <ul>
+                    <section class="notes-section">
+                        <h2><span class="icon">#</span> Action Items <span class="section-badge">${meeting.action_items.length}</span></h2>
+                        <ul class="action-items-list">
                             ${meeting.action_items.map(item => `
                                 <li class="action-item">
                                     <span class="action-task">${this._escape(item.task || item.description || item)}</span>
@@ -243,9 +253,9 @@ class MeetingNotesRenderer {
                 ` : ''}
                 
                 ${meeting.open_questions?.length > 0 ? `
-                    <section class="open-questions">
-                        <h2>Open Questions</h2>
-                        <ul>
+                    <section class="notes-section">
+                        <h2><span class="icon">?</span> Open Questions <span class="section-badge">${meeting.open_questions.length}</span></h2>
+                        <ul class="questions-list">
                             ${meeting.open_questions.map(q => `
                                 <li>${this._escape(q)}</li>
                             `).join('')}
@@ -253,22 +263,24 @@ class MeetingNotesRenderer {
                     </section>
                 ` : ''}
                 
-                <section class="transcript">
-                    <h2>Transcript <span class="transcript-count">(${meeting.transcript?.length || 0} entries)</span></h2>
-                    <div class="transcript-entries">
-                        ${(meeting.transcript || []).map(entry => `
-                            <div class="transcript-entry">
-                                <span class="speaker">${this._escape(entry.speaker)}:</span>
-                                <span class="text">${this._escape(entry.text)}</span>
-                            </div>
-                        `).join('')}
-                    </div>
-                </section>
+                ${meeting.transcript?.length > 0 ? `
+                    <section class="notes-section">
+                        <h2><span class="icon">&gt;</span> Transcript <span class="section-badge">${meeting.transcript.length}</span></h2>
+                        <div class="transcript-container">
+                            ${meeting.transcript.map(entry => `
+                                <div class="transcript-entry">
+                                    <span class="speaker">${this._escape(entry.speaker || 'Speaker')}:</span>
+                                    <span class="text">${this._escape(entry.text)}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </section>
+                ` : ''}
             </div>
         `;
         
         // Auto-scroll transcript to bottom
-        const transcriptEl = this.container.querySelector('.transcript-entries');
+        const transcriptEl = this.container.querySelector('.transcript-container');
         if (transcriptEl) {
             transcriptEl.scrollTop = transcriptEl.scrollHeight;
         }

@@ -1,12 +1,11 @@
 """
 WebSocket server for handling WebRTC audio streams and managing meeting state.
 
-Key insight: Google Speech API streaming works synchronously.
-We need to bridge async WebSocket with sync Speech API properly.
-
-Audio Format:
-- Browser sends raw PCM (Int16, 16kHz, mono) via AudioWorklet
-- This matches Google Speech API LINEAR16 format exactly
+Features:
+- Real-time audio streaming to Google Speech API
+- 30-second interval Gemini processing
+- SQLite persistence for meetings
+- Meeting continuation support
 """
 
 import asyncio
@@ -20,18 +19,20 @@ from typing import Optional
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from google.cloud import speech
 from google.oauth2 import service_account
 from dotenv import load_dotenv
 
-from meeting_state import MeetingNoteManager
+from meeting_state import MeetingNoteManager, MeetingNote
+import database as db
 
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
 
-# Audio parameters - must match browser AudioWorklet
+# Audio parameters
 SAMPLE_RATE = 16000
 
 
@@ -45,7 +46,7 @@ def get_credentials() -> service_account.Credentials:
     return service_account.Credentials.from_service_account_info(creds_info)
 
 
-# Store active meetings
+# Store active meetings in memory
 active_meetings: dict[str, "MeetingSession"] = {}
 
 
@@ -56,21 +57,32 @@ class MeetingSession:
         self.meeting_id = meeting_id
         self.loop = loop
         self.clients: list[WebSocket] = []
-        
-        # Thread-safe queue for audio chunks
         self.audio_queue: queue.Queue[bytes | None] = queue.Queue()
-        
         self.is_streaming = False
         self._stream_thread: Optional[threading.Thread] = None
         
-        # Note manager with callback for broadcasting state updates
-        self.note_manager = MeetingNoteManager(
-            meeting_id=meeting_id,
-            on_state_update=self._sync_broadcast_state
-        )
+        # Load existing meeting or create new
+        existing = db.get_meeting(meeting_id)
+        if existing:
+            self.note_manager = MeetingNoteManager(
+                meeting_id=meeting_id,
+                on_state_update=self._on_update,
+                initial_state=existing
+            )
+            print(f"[{meeting_id}] Loaded existing meeting: {existing['title']}")
+        else:
+            db.create_meeting(meeting_id)
+            self.note_manager = MeetingNoteManager(
+                meeting_id=meeting_id,
+                on_state_update=self._on_update
+            )
+            print(f"[{meeting_id}] Created new meeting")
 
-    def _sync_broadcast_state(self):
-        """Sync wrapper to call async broadcast from thread."""
+    def _on_update(self):
+        """Called when meeting state changes - save and broadcast."""
+        # Save to database
+        db.update_meeting(self.meeting_id, self.note_manager.to_dict())
+        # Broadcast to clients
         asyncio.run_coroutine_threadsafe(self.broadcast_state(), self.loop)
 
     async def add_client(self, websocket: WebSocket):
@@ -82,16 +94,12 @@ class MeetingSession:
         })
 
     def remove_client(self, websocket: WebSocket):
-        """Remove a disconnected client."""
         if websocket in self.clients:
             self.clients.remove(websocket)
 
     async def broadcast_state(self):
         """Push updated meeting state to all clients."""
-        state = {
-            "type": "state_update",
-            "meeting": self.note_manager.to_dict()
-        }
+        state = {"type": "state_update", "meeting": self.note_manager.to_dict()}
         disconnected = []
         for client in self.clients:
             try:
@@ -103,11 +111,7 @@ class MeetingSession:
 
     async def broadcast_interim(self, text: str, speaker: Optional[str]):
         """Send interim transcript to all clients."""
-        message = {
-            "type": "interim_transcript",
-            "text": text,
-            "speaker": speaker
-        }
+        message = {"type": "interim_transcript", "text": text, "speaker": speaker}
         for client in self.clients:
             try:
                 await client.send_json(message)
@@ -115,20 +119,21 @@ class MeetingSession:
                 pass
 
     def process_audio_chunk(self, chunk: bytes):
-        """Queue audio chunk (called from async context)."""
+        """Queue audio chunk."""
         self.audio_queue.put(chunk)
 
     async def start_streaming(self):
-        """Start Google Speech streaming and Gemini processing loop."""
+        """Start Google Speech streaming and Gemini processing."""
         if self.is_streaming:
             return
         
         self.is_streaming = True
+        db.set_meeting_active(self.meeting_id, True)
         
-        # Start the note manager's 30-second processing loop
+        # Start Gemini processing loop
         await self.note_manager.start()
         
-        # Start Google Speech streaming in a separate thread
+        # Start Speech API thread
         self._stream_thread = threading.Thread(
             target=self._run_speech_streaming,
             daemon=True
@@ -138,44 +143,40 @@ class MeetingSession:
         print(f"[{self.meeting_id}] Streaming started")
 
     async def stop_streaming(self):
-        """Stop streaming and do final processing."""
+        """Stop streaming and save final state."""
         if not self.is_streaming:
             return
             
         self.is_streaming = False
+        db.set_meeting_active(self.meeting_id, False)
         print(f"[{self.meeting_id}] Stopping streaming...")
         
-        # Signal the audio generator to stop
+        # Signal audio generator to stop
         self.audio_queue.put(None)
         
-        # Wait for thread to finish
         if self._stream_thread:
             self._stream_thread.join(timeout=5)
         
-        # Stop note manager (processes any remaining buffer)
+        # Final processing
         await self.note_manager.stop()
         
-        # Broadcast final state
+        # Save final state
+        db.update_meeting(self.meeting_id, self.note_manager.to_dict())
+        
         await self.broadcast_state()
-        print(f"[{self.meeting_id}] Streaming stopped")
+        print(f"[{self.meeting_id}] Streaming stopped and saved")
 
     def _run_speech_streaming(self):
-        """
-        Run Google Speech API streaming (in thread).
-        
-        This is based on transcribe_live.py which works.
-        """
+        """Run Google Speech API streaming in thread."""
         credentials = get_credentials()
         client = speech.SpeechClient(credentials=credentials)
 
-        # Speaker diarization config
         diarization_config = speech.SpeakerDiarizationConfig(
             enable_speaker_diarization=True,
             min_speaker_count=1,
             max_speaker_count=4
         )
 
-        # Recognition config - LINEAR16 format
         config = speech.RecognitionConfig(
             encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
             sample_rate_hertz=SAMPLE_RATE,
@@ -190,7 +191,6 @@ class MeetingSession:
         )
 
         def audio_generator():
-            """Yield audio chunks from queue."""
             while self.is_streaming:
                 try:
                     chunk = self.audio_queue.get(timeout=0.1)
@@ -203,16 +203,14 @@ class MeetingSession:
         while self.is_streaming:
             try:
                 print(f"[{self.meeting_id}] Starting Speech API stream...")
-                requests = audio_generator()
                 responses = client.streaming_recognize(
                     config=streaming_config,
-                    requests=requests
+                    requests=audio_generator()
                 )
                 
                 for response in responses:
                     if not self.is_streaming:
                         break
-                        
                     if not response.results:
                         continue
 
@@ -223,7 +221,6 @@ class MeetingSession:
                     transcript = result.alternatives[0].transcript
                     is_final = result.is_final
                     
-                    # Get speaker tag
                     speaker = None
                     if result.alternatives[0].words:
                         tag = result.alternatives[0].words[-1].speaker_tag
@@ -231,13 +228,11 @@ class MeetingSession:
 
                     if is_final:
                         print(f"[FINAL] {speaker}: {transcript}")
-                        # Schedule async task to add transcript
                         asyncio.run_coroutine_threadsafe(
                             self._handle_final_transcript(transcript, speaker),
                             self.loop
                         )
                     else:
-                        # Schedule async task to broadcast interim
                         asyncio.run_coroutine_threadsafe(
                             self.broadcast_interim(transcript, speaker),
                             self.loop
@@ -251,19 +246,20 @@ class MeetingSession:
                     print(f"[{self.meeting_id}] Google 5-min limit, restarting...")
                 else:
                     print(f"[{self.meeting_id}] Speech API error: {e}")
-                # Brief pause before restart
                 import time
                 time.sleep(0.5)
 
         print(f"[{self.meeting_id}] Speech streaming thread ended")
 
     async def _handle_final_transcript(self, transcript: str, speaker: Optional[str]):
-        """Handle a final transcript result."""
+        """Handle final transcript result."""
         await self.note_manager.add_transcript(
             text=transcript,
             speaker=speaker,
             timestamp=datetime.now().isoformat()
         )
+        # Save incrementally
+        db.update_meeting(self.meeting_id, self.note_manager.to_dict())
         await self.broadcast_state()
 
 
@@ -275,7 +271,7 @@ async def lifespan(app: FastAPI):
         await session.stop_streaming()
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(title="Meeting Notes", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -285,32 +281,79 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve static files
 static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
+# ============ API Routes ============
+
 @app.get("/")
 async def root():
-    """Serve the meeting page."""
-    from fastapi.responses import FileResponse
+    """Serve the main page."""
     return FileResponse(static_dir / "index.html")
 
 
+@app.get("/api/meetings")
+async def list_meetings(limit: int = 50, offset: int = 0):
+    """List all meetings."""
+    return db.list_meetings(limit, offset)
+
+
+@app.post("/api/meetings")
+async def create_meeting(data: dict = None):
+    """Create a new meeting."""
+    import uuid
+    meeting_id = f"meeting-{uuid.uuid4().hex[:8]}"
+    title = data.get("title", "Untitled Meeting") if data else "Untitled Meeting"
+    return db.create_meeting(meeting_id, title)
+
+
+@app.get("/api/meetings/{meeting_id}")
+async def get_meeting(meeting_id: str):
+    """Get a specific meeting."""
+    meeting = db.get_meeting(meeting_id)
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    return meeting
+
+
+@app.put("/api/meetings/{meeting_id}")
+async def update_meeting(meeting_id: str, data: dict):
+    """Update a meeting."""
+    meeting = db.update_meeting(meeting_id, data)
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    
+    # Broadcast to active clients
+    if meeting_id in active_meetings:
+        await active_meetings[meeting_id].broadcast_state()
+    
+    return meeting
+
+
+@app.delete("/api/meetings/{meeting_id}")
+async def delete_meeting(meeting_id: str):
+    """Delete a meeting."""
+    if meeting_id in active_meetings:
+        await active_meetings[meeting_id].stop_streaming()
+        del active_meetings[meeting_id]
+    
+    if not db.delete_meeting(meeting_id):
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    
+    return {"status": "deleted"}
+
+
+# ============ WebSocket ============
+
 @app.websocket("/ws/meeting/{meeting_id}")
 async def websocket_meeting(websocket: WebSocket, meeting_id: str):
-    """
-    WebSocket endpoint for meeting audio streaming.
-    
-    Protocol:
-    - Binary frames: Raw PCM audio (Int16, 16kHz, mono)
-    - Text frames: JSON commands
-    """
+    """WebSocket endpoint for meeting audio streaming."""
     await websocket.accept()
     
     loop = asyncio.get_event_loop()
     
-    # Get or create meeting session
+    # Get or create session
     if meeting_id not in active_meetings:
         active_meetings[meeting_id] = MeetingSession(meeting_id, loop)
     
@@ -322,7 +365,6 @@ async def websocket_meeting(websocket: WebSocket, meeting_id: str):
             message = await websocket.receive()
             
             if "bytes" in message:
-                # Audio chunk - add to queue (sync call is fine here)
                 session.process_audio_chunk(message["bytes"])
             
             elif "text" in message:
@@ -342,22 +384,14 @@ async def websocket_meeting(websocket: WebSocket, meeting_id: str):
                 
                 elif command == "update_title":
                     session.note_manager.meeting.title = data.get("title", "")
+                    db.update_meeting(meeting_id, session.note_manager.to_dict())
                     await session.broadcast_state()
 
     except WebSocketDisconnect:
         session.remove_client(websocket)
         if not session.clients:
-            await session.stop_streaming()
-            if meeting_id in active_meetings:
-                del active_meetings[meeting_id]
-
-
-@app.get("/api/meeting/{meeting_id}")
-async def get_meeting(meeting_id: str):
-    """Get meeting state."""
-    if meeting_id in active_meetings:
-        return active_meetings[meeting_id].note_manager.to_dict()
-    return {"error": "Meeting not found"}
+            # Keep session for a bit in case of reconnect
+            pass
 
 
 if __name__ == "__main__":
