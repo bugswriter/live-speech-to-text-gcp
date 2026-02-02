@@ -1,12 +1,18 @@
 [project]
 name = "live-speech-to-text-gcp"
 version = "0.1.0"
-description = "Add your description here"
+description = "Live speech-to-text with meeting notes"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.12,<3.14"
 dependencies = [
-    "google-cloud-speech>=2.36.0",
-    "google-cloud-storage>=3.8.0",
+    "google-cloud-speech>=2.30.0",
+    "google-cloud-storage>=2.14.0,<3.0.0",
     "pyaudio>=0.2.14",
     "python-dotenv>=1.2.1",
+    # Backend server
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "websockets>=13.0",
+    # AI processing
+    "google-generativeai>=0.8.0",
 ]

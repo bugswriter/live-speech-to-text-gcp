@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meeting Notes</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        .btn-record { background: #4CAF50; color: white; }
+        .btn-record:hover { background: #45a049; }
+        .btn-record.recording { background: #f44336; animation: pulse 1s infinite; }
+        .btn-stop { background: #666; color: white; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+        
+        .status { flex: 1; text-align: right; color: #666; font-size: 14px; }
+        .status.processing { color: #2196F3; }
+        
+        #meeting-container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .meeting-header { border-bottom: 1px solid #eee; padding-bottom: 15px; margin-bottom: 20px; }
+        .meeting-title { font-size: 24px; outline: none; border: none; width: 100%; }
+        .meeting-title:focus { background: #f9f9f9; }
+        .meeting-meta { color: #666; font-size: 14px; margin-top: 5px; }
+        
+        section { margin-bottom: 25px; }
+        section h2 { 
+            font-size: 16px; 
+            color: #333; 
+            margin-bottom: 10px; 
+            padding-bottom: 5px;
+            border-bottom: 2px solid #4CAF50;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .transcript-count { font-weight: normal; color: #999; font-size: 12px; }
+        
+        /* Summary */
+        .summary-content { 
+            color: #444; 
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            border-left: 3px solid #4CAF50;
+        }
+        .summary-content p { margin-bottom: 10px; }
+        .summary-content p:last-child { margin-bottom: 0; }
+        
+        /* Key Points */
+        .key-points ul { list-style: none; }
+        .key-points li { 
+            padding: 8px 12px;
+            margin: 5px 0;
+            background: #e8f5e9;
+            border-radius: 4px;
+            position: relative;
+            padding-left: 24px;
+        }
+        .key-points li::before {
+            content: "•";
+            position: absolute;
+            left: 10px;
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        
+        /* Decisions */
+        .decision-item {
+            padding: 12px;
+            margin: 8px 0;
+            background: #e3f2fd;
+            border-radius: 5px;
+            border-left: 3px solid #2196F3;
+        }
+        .decision-text { font-weight: 500; color: #1565c0; }
+        .decision-rationale { color: #666; font-size: 13px; margin-top: 5px; }
+        .decision-participants { color: #999; font-size: 12px; margin-top: 3px; }
+        
+        /* Action Items */
+        .action-items ul { list-style: none; }
+        .action-item { 
+            padding: 10px 12px;
+            background: #fff3cd;
+            border-radius: 4px;
+            margin: 5px 0;
+            border-left: 3px solid #ffc107;
+        }
+        .action-task { display: block; }
+        .assignee { 
+            display: inline-block;
+            background: #856404;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            margin-top: 5px;
+        }
+        .action-context { color: #666; font-size: 13px; margin-top: 5px; }
+        
+        /* Open Questions */
+        .open-questions ul { list-style: none; }
+        .open-questions li {
+            padding: 8px 12px;
+            margin: 5px 0;
+            background: #fce4ec;
+            border-radius: 4px;
+            border-left: 3px solid #e91e63;
+            color: #880e4f;
+        }
+        
+        /* Transcript */
+        .transcript-entries { 
+            max-height: 300px; 
+            overflow-y: auto;
+            border: 1px solid #eee;
+            border-radius: 4px;
+            padding: 10px;
+        }
+        .transcript-entry { 
+            padding: 5px 0; 
+            border-bottom: 1px solid #f0f0f0; 
+        }
+        .transcript-entry:last-child { border-bottom: none; }
+        .transcript-entry .speaker { 
+            font-weight: bold; 
+            color: #333; 
+            margin-right: 5px;
+        }
+        .transcript-entry .text { color: #666; }
+        
+        /* Interim transcript (live typing indicator) */
+        .interim-transcript {
+            background: linear-gradient(90deg, #e3f2fd, #bbdefb);
+            padding: 12px 15px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            font-style: italic;
+            animation: fadeIn 0.3s;
+            border-left: 3px solid #2196F3;
+        }
+        .interim-transcript .speaker { font-weight: bold; color: #1565c0; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            color: #999;
+            padding: 40px;
+        }
+        
+        /* Processing indicator */
+        .processing-indicator {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #2196F3;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 5px;
+            font-size: 13px;
+            animation: slideIn 0.3s;
+            z-index: 1000;
+        }
+        @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <button id="recordBtn" class="btn-record">Start Recording</button>
+        <button id="stopBtn" class="btn-stop" disabled>Stop</button>
+        <span id="status" class="status">Ready - Click to start</span>
+    </div>
+    
+    <div id="meeting-container">
+        <p class="empty-state">Click "Start Recording" to begin the meeting.<br>Notes will update automatically every 30 seconds.</p>
+    </div>
+
+    <script src="/static/meeting-client.js"></script>
+    <script>
+        // Get or create meeting ID
+        const meetingId = new URLSearchParams(window.location.search).get('id') || 
+                          'meeting-' + Math.random().toString(36).substr(2, 9);
+        
+        if (!window.location.search.includes('id=')) {
+            history.replaceState(null, '', `?id=${meetingId}`);
+        }
+        
+        const renderer = new MeetingNotesRenderer('meeting-container');
+        let lastUpdateTime = null;
+        
+        const client = new MeetingClient(
+            meetingId,
+            (meeting) => {
+                renderer.render(meeting);
+                lastUpdateTime = new Date();
+                updateStatus();
+            },
+            (text, speaker) => renderer.showInterimTranscript(text, speaker)
+        );
+        
+        const recordBtn = document.getElementById('recordBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const status = document.getElementById('status');
+        
+        function updateStatus() {
+            if (!client.isRecording) return;
+            
+            const now = new Date();
+            if (lastUpdateTime) {
+                const secAgo = Math.floor((now - lastUpdateTime) / 1000);
+                const nextUpdate = Math.max(0, 30 - secAgo);
+                status.textContent = `Recording... Next AI update in ${nextUpdate}s`;
+            } else {
+                status.textContent = 'Recording... Waiting for first transcript';
+            }
+        }
+        
+        // Update status every second
+        setInterval(updateStatus, 1000);
+        
+        recordBtn.onclick = async () => {
+            try {
+                status.textContent = 'Connecting...';
+                await client.connect();
+                
+                status.textContent = 'Starting recording...';
+                await client.startRecording();
+                
+                recordBtn.classList.add('recording');
+                recordBtn.textContent = 'Recording...';
+                recordBtn.disabled = true;
+                stopBtn.disabled = false;
+                status.textContent = 'Recording... Waiting for speech';
+            } catch (error) {
+                status.textContent = 'Error: ' + error.message;
+                console.error(error);
+            }
+        };
+        
+        stopBtn.onclick = () => {
+            client.stopRecording();
+            recordBtn.classList.remove('recording');
+            recordBtn.textContent = 'Start Recording';
+            recordBtn.disabled = false;
+            stopBtn.disabled = true;
+            status.textContent = 'Recording stopped - Processing final notes...';
+            renderer.hideInterimTranscript();
+            
+            // Final status after a moment
+            setTimeout(() => {
+                status.textContent = 'Meeting ended';
+            }, 3000);
+        };
+        
+        window.onbeforeunload = () => client.disconnect();
+    </script>
+</body>
+</html>
