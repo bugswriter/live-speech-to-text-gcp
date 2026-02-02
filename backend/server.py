@@ -362,7 +362,17 @@ async def websocket_meeting(websocket: WebSocket, meeting_id: str):
     
     try:
         while True:
-            message = await websocket.receive()
+            try:
+                message = await websocket.receive()
+            except RuntimeError as e:
+                # Handle "Cannot call receive once disconnect received"
+                if "disconnect" in str(e).lower():
+                    break
+                raise
+            
+            # Check for disconnect message
+            if message.get("type") == "websocket.disconnect":
+                break
             
             if "bytes" in message:
                 session.process_audio_chunk(message["bytes"])
@@ -388,10 +398,10 @@ async def websocket_meeting(websocket: WebSocket, meeting_id: str):
                     await session.broadcast_state()
 
     except WebSocketDisconnect:
+        pass
+    finally:
         session.remove_client(websocket)
-        if not session.clients:
-            # Keep session for a bit in case of reconnect
-            pass
+        # Keep session around for potential reconnects
 
 
 if __name__ == "__main__":
