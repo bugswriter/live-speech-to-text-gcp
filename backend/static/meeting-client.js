@@ -82,19 +82,24 @@ class MeetingClient {
         if (this.isRecording) return;
         
         try {
-            // Get microphone access
+            // Get microphone access, requesting 16kHz but being flexible
             this.audioStream = await navigator.mediaDevices.getUserMedia({
                 audio: {
                     channelCount: 1,
-                    sampleRate: 16000,  // Match Google Speech API
+                    sampleRate: 16000,  // Request 16kHz
                     echoCancellation: true,
                     noiseSuppression: true,
                     autoGainControl: true,
                 }
             });
             
-            // Create AudioContext at 16kHz to match Google Speech API
-            this.audioContext = new AudioContext({ sampleRate: 16000 });
+            // Get the actual sample rate from the audio stream's settings
+            const actualSampleRate = this.audioStream.getAudioTracks()[0].getSettings().sampleRate;
+            console.log('Actual microphone sample rate:', actualSampleRate);
+
+            // Create AudioContext with the *actual* sample rate of the microphone
+            // We will resample to 16kHz in the AudioWorklet if needed.
+            this.audioContext = new AudioContext({ sampleRate: actualSampleRate });
             
             // Load the AudioWorklet processor
             await this.audioContext.audioWorklet.addModule('/static/audio-processor.js');
@@ -103,12 +108,16 @@ class MeetingClient {
             const source = this.audioContext.createMediaStreamSource(this.audioStream);
             
             // Create AudioWorklet node
-            this.audioWorklet = new AudioWorkletNode(this.audioContext, 'audio-processor');
+            this.audioWorklet = new AudioWorkletNode(this.audioContext, 'audio-processor', {
+                processorOptions: {
+                    targetSampleRate: 16000 // Tell worklet to resample to this
+                }
+            });
             
             // Handle audio data from worklet
             this.audioWorklet.port.onmessage = (event) => {
                 if (this.ws?.readyState === WebSocket.OPEN) {
-                    // event.data is ArrayBuffer of Int16 samples
+                    // event.data is ArrayBuffer of Int16 samples (now guaranteed 16kHz)
                     this.ws.send(event.data);
                 }
             };
