@@ -22,15 +22,24 @@ from dataclasses import dataclass, field, asdict
 from typing import Optional, Callable
 import google.generativeai as genai
 from dotenv import load_dotenv
+from dataclass_wizard import DataclassWizard
+from typing import Optional, Callable, List
 
 load_dotenv()
 
+@dataclass
+class AgendaItem:
+    """Represents a single agenda item."""
+    id: str
+    text: str
+    completed: bool = False
+    completed_at: Optional[str] = None # When it was completed
 
 @dataclass
 class MeetingNote:
     """The meeting state that gets pushed to frontend."""
     id: str
-    title: str = "Untitled Meeting"
+    title: str = field(default="Untitled Meeting")
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     
     # Raw transcript (append-only)
@@ -45,19 +54,25 @@ class MeetingNote:
     
     # Participant tracking
     participants: list[str] = field(default_factory=list)
+
+    # New agenda field
+    agenda: List[AgendaItem] = field(default_factory=list)
     
     # For context continuity between intervals
     _previous_summary: str = field(default="", repr=False)
+
+    def to_dict(self):
+        return asdict(self)
 
 
 class GeminiProcessor:
     """
     Handles Gemini API calls for note generation.
     
-    Key design: We pass the previous summary to maintain context
-    across 30-second intervals, handling incomplete sentences.
+    Key design: We pass the previous summary and current agenda to maintain context
+    across 30-second intervals, handling incomplete sentences and tracking agenda progress.
     """
-    
+ 
     def __init__(self):
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
@@ -70,22 +85,29 @@ class GeminiProcessor:
         self,
         new_transcript: list[dict],
         previous_summary: str,
+        current_agenda: List[AgendaItem], # New: current agenda for context
         full_transcript: list[dict]
     ) -> dict:
+
         """
         Process a batch of transcripts and generate/update notes.
         
         Args:
             new_transcript: Latest 30-sec batch of transcript entries
             previous_summary: Summary from last processing (for context)
+            current_agenda: The current list of agenda items with their completion status
             full_transcript: Complete transcript so far (for reference)
         
         Returns:
-            Structured notes dict with summary, key_points, action_items, etc.
+            Structured notes dict with summary, key_points, action_items, etc.,
+            including updated agenda items.
         """
         
         # Format transcript for the prompt
         transcript_text = self._format_transcript(new_transcript)
+
+        # Format agenda for the prompt
+        agenda_text = self._format_agenda_for_prompt(current_agenda)
         
         prompt = f"""You are a meeting note assistant. Analyze the following conversation transcript and generate structured meeting notes.
 
@@ -94,8 +116,16 @@ IMPORTANT CONTEXT:
 - Previous summary (use this to understand incomplete sentences or references): 
 {previous_summary if previous_summary else "This is the start of the meeting."}
 
+CURRENT AGENDA ITEMS (DO NOT CHANGE THESE UNLESS EXPLICITLY DISCUSSED AS COMPLETED OR MOVED ON):
+{agenda_text if agenda_text else "No agenda set."}
+
 NEW TRANSCRIPT TO PROCESS:
 {transcript_text}
+
+Based on the NEW TRANSCRIPT, do the following:
+1. Update the status of any agenda items if they were clearly discussed and completed. If an item is completed, mark 'completed: true' and set 'completed_at' to the current timestamp. Do not mark an item as complete if it's only partially discussed or mentioned.
+2. If new topics arise that should be added to the agenda, suggest them in 'new_agenda_items'.
+3. Generate the usual meeting notes (summary, key_points, action_items, decisions, open_questions).
 
 Generate meeting notes in the following JSON format. Be concise but capture all important information:
 
@@ -116,6 +146,16 @@ Generate meeting notes in the following JSON format. Be concise but capture all 
     ],
     "opinion_changes": [
         {{"speaker": "name", "from": "previous stance", "to": "new stance", "topic": "what changed"}}
+    ],
+    "updated_agenda": [
+        // Only include agenda items from CURRENT AGENDA ITEMS that have changed their 'completed' status.
+        // For new items, suggest them in 'new_agenda_items'
+        // Example for an updated item: {{"id": "agenda-item-id", "text": "Old text if needed", "completed": true, "completed_at": "timestamp"}}
+    ],
+    "new_agenda_items": [
+        // List any *new* agenda items suggested by the conversation, in text format
+        "New topic to add to agenda",
+        "Another new item"
     ]
 }}
 
@@ -124,9 +164,12 @@ Rules:
 2. If a sentence seems incomplete, use the previous summary context to infer meaning
 3. Track when someone changes their opinion on a topic
 4. Be specific about WHO said WHAT
-5. Return ONLY valid JSON, no markdown or explanation
+5. For "updated_agenda", ONLY include items from the provided "CURRENT AGENDA ITEMS" that are now clearly completed based on the "NEW TRANSCRIPT". Do NOT include items that are already completed or not discussed as completed.
+6. For "new_agenda_items", list any new topics that arose from the conversation and seem like they should be part of the agenda.
+7. Return ONLY valid JSON, no markdown or explanation.
 
 JSON:"""
+
 
         response_text = ""
         try:
@@ -156,7 +199,9 @@ JSON:"""
                 "key_points": [],
                 "action_items": [],
                 "decisions": [],
-                "open_questions": []
+                "open_questions": [],
+                "updated_agenda": [],
+                "new_agenda_items": []
             }
         except Exception as e:
             print(f"Gemini API error: {e}")
@@ -165,7 +210,9 @@ JSON:"""
                 "key_points": [],
                 "action_items": [],
                 "decisions": [],
-                "open_questions": []
+                "open_questions": [],
+                "updated_agenda": [],
+                "new_agenda_items": []
             }
     
     def _format_transcript(self, transcript: list[dict]) -> str:
@@ -177,6 +224,16 @@ JSON:"""
             lines.append(f"[{speaker}]: {text}")
         return "\n".join(lines)
 
+    def _format_agenda_for_prompt(self, agenda: List[AgendaItem]) -> str:
+        """Format agenda items for the prompt."""
+        if not agenda:
+            return ""
+        lines = []
+        for item in agenda:
+            status = " [COMPLETED]" if item.completed else ""
+            lines.append(f"- ID: {item.id}, Text: {item.text}{status}")
+        return "\n".join(lines)
+
 
 class MeetingNoteManager:
     """
@@ -186,7 +243,7 @@ class MeetingNoteManager:
     1. Transcripts arrive continuously from Google Speech
     2. They're buffered in _transcript_buffer
     3. Every PROCESS_INTERVAL seconds, buffer is sent to Gemini
-    4. Results update the meeting state
+    4. Results update the meeting state, including agenda items
     5. State is broadcast to clients via callback
     """
     
@@ -200,6 +257,19 @@ class MeetingNoteManager:
     ):
         # Load from initial state if provided (for continuing meetings)
         if initial_state:
+            #self.meeting = MeetingNote.from_dict(initial_state)
+            #self.meeting.id = meeting_id # Ensure ID is set
+            #print(f"[{meeting_id}] Loaded existing meeting: {self.meeting.title}")
+
+            # Manually reconstruct MeetingNote and AgendaItem objects
+            agenda_items = [
+                AgendaItem(
+                    id=item['id'],
+                    text=item['text'],
+                    completed=item.get('completed', False),
+                    completed_at=item.get('completed_at')
+                ) for item in initial_state.get('agenda', [])
+            ]
             self.meeting = MeetingNote(
                 id=meeting_id,
                 title=initial_state.get("title", "Untitled Meeting"),
@@ -211,10 +281,13 @@ class MeetingNoteManager:
                 decisions=initial_state.get("decisions", []),
                 open_questions=initial_state.get("open_questions", []),
                 participants=initial_state.get("participants", []),
+                agenda=agenda_items, # Use the parsed list
                 _previous_summary=initial_state.get("_previous_summary", ""),
             )
+            print(f"[{meeting_id}] Loaded existing meeting: {self.meeting.title}")
         else:
             self.meeting = MeetingNote(id=meeting_id)
+            print(f"[{meeting_id}] Created new meeting object")
         
         self._transcript_buffer: list[dict] = []
         self._on_state_update = on_state_update
@@ -283,6 +356,28 @@ class MeetingNoteManager:
         # Track participants
         if speaker and speaker not in self.meeting.participants:
             self.meeting.participants.append(speaker)
+
+    def add_agenda_item(self, text: str):
+        """Manually add a new agenda item."""
+        import uuid
+        new_item = AgendaItem(id=f"agenda-{uuid.uuid4().hex[:4]}", text=text, completed=False)
+        self.meeting.agenda.append(new_item)
+        if self._on_state_update:
+            self._on_state_update()
+
+    def update_agenda_item_status(self, item_id: str, completed: bool):
+        """Manually update an agenda item's completion status."""
+        for item in self.meeting.agenda:
+            if item.id == item_id:
+                item.completed = completed
+                if completed:
+                    item.completed_at = datetime.now().isoformat()
+                else:
+                    item.completed_at = None
+                break
+        if self._on_state_update:
+            self._on_state_update()
+
     
     async def _processing_loop(self):
         """Background loop that processes buffer every PROCESS_INTERVAL seconds."""
@@ -321,6 +416,7 @@ class MeetingNoteManager:
         result = await self._processor.process_transcript_batch(
             new_transcript=batch,
             previous_summary=self.meeting._previous_summary,
+            current_agenda=self.meeting.agenda, # Pass current agenda
             full_transcript=self.meeting.transcript
         )
         
@@ -339,7 +435,7 @@ class MeetingNoteManager:
         print(f"[{datetime.now().isoformat()}] Processing complete. Summary: {result.get('summary', '')[:100]}...")
     
     def _merge_result(self, result: dict):
-        """Merge Gemini's output into meeting state."""
+        """Merge Gemini's output into meeting state. including agenda."""
         
         # Update summary (cumulative - append to build full meeting summary)
         new_summary = result.get("summary", "")
@@ -369,9 +465,42 @@ class MeetingNoteManager:
         if new_questions:
             # Keep questions that weren't answered, add new ones
             self.meeting.open_questions = new_questions
+
+
+        # --- Handle Agenda Updates ---
+        # 1. Update existing agenda items based on Gemini's "updated_agenda"
+        updated_agenda_from_gemini = result.get("updated_agenda", [])
+        for gemini_item in updated_agenda_from_gemini:
+            item_id = gemini_item.get("id")
+            completed = gemini_item.get("completed")
+            completed_at = gemini_item.get("completed_at")
+            
+            if item_id:
+                for existing_item in self.meeting.agenda:
+                    if existing_item.id == item_id:
+                        # Only update if Gemini explicitly says it's completed and it wasn't already
+                        if completed is True and existing_item.completed is False:
+                            existing_item.completed = True
+                            existing_item.completed_at = completed_at if completed_at else datetime.now().isoformat()
+                            print(f"[{self.meeting.id}] Agenda item '{existing_item.text}' marked as completed by AI.")
+                        break
+        
+        # 2. Add new agenda items suggested by Gemini's "new_agenda_items"
+        new_agenda_items_from_gemini = result.get("new_agenda_items", [])
+        for new_item_text in new_agenda_items_from_gemini:
+            # Check for duplicates before adding
+            if not any(item.text == new_item_text for item in self.meeting.agenda):
+                import uuid
+                new_item = AgendaItem(id=f"agenda-{uuid.uuid4().hex[:4]}", text=new_item_text, completed=False)
+                self.meeting.agenda.append(new_item)
+                print(f"[{self.meeting.id}] New agenda item added by AI: '{new_item_text}'")
+
+        # Opinion changes are noted in decisions/key_points, no separate tracking needed
+
+
         
         # Opinion changes are noted in decisions/key_points, no separate tracking needed
 
 
 # For backward compatibility with server.py imports
-__all__ = ["MeetingNote", "MeetingNoteManager", "GeminiProcessor"]
+__all__ = ["MeetingNote", "MeetingNoteManager", "GeminiProcessor", "AgendaItem"]

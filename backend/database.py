@@ -58,7 +58,8 @@ def init_db():
                 open_questions TEXT DEFAULT '[]',
                 participants TEXT DEFAULT '[]',
                 previous_summary TEXT DEFAULT '',
-                is_active INTEGER DEFAULT 0
+                is_active INTEGER DEFAULT 0,
+                agenda TEXT DEFAULT '[]' -- New agenda column
             )
         """)
         
@@ -68,16 +69,25 @@ def init_db():
             ON meetings(updated_at DESC)
         """)
 
+        # Add agenda column if it doesn't exist (for existing databases)
+        # This is a simple ALTER TABLE, more robust migrations might be needed for complex schemas
+        try:
+            conn.execute("ALTER TABLE meetings ADD COLUMN agenda TEXT DEFAULT '[]'")
+        except sqlite3.OperationalError as e:
+            if "duplicate column name: agenda" not in str(e):
+                raise
 
-def create_meeting(meeting_id: str, title: str = "Untitled Meeting") -> dict:
+
+def create_meeting(meeting_id: str, title: str = "Untitled Meeting", agenda: Optional[list[dict]] = None) -> dict:
     """Create a new meeting."""
     now = datetime.now().isoformat()
+    agenda_json = json.dumps(agenda) if agenda else '[]'
     
     with get_db() as conn:
         conn.execute("""
-            INSERT INTO meetings (id, title, created_at, updated_at)
-            VALUES (?, ?, ?, ?)
-        """, (meeting_id, title, now, now))
+            INSERT INTO meetings (id, title, created_at, updated_at, agenda)
+            VALUES (?, ?, ?, ?, ?)
+        """, (meeting_id, title, now, now, agenda_json))
     
     return get_meeting(meeting_id)
 
@@ -112,6 +122,7 @@ def update_meeting(meeting_id: str, data: dict) -> Optional[dict]:
         "open_questions": json.dumps(data.get("open_questions", [])),
         "participants": json.dumps(data.get("participants", [])),
         "previous_summary": data.get("_previous_summary", ""),
+        "agenda": json.dumps(data.get("agenda", [])), # New agenda field
     }
     
     # Build SET clause
@@ -186,6 +197,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
         "participants": json.loads(row["participants"]),
         "_previous_summary": row["previous_summary"],
         "is_active": bool(row["is_active"]),
+        "agenda": json.loads(row["agenda"]), # New: Deserialize agenda
     }
 
 

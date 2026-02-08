@@ -15,4 +15,5 @@ dependencies = [
     "websockets>=13.0",
     # AI processing
     "google-generativeai>=0.8.0",
+    "dataclass-wizard>=0.39.1",
 ]

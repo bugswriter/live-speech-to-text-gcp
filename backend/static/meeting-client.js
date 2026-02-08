@@ -174,6 +174,45 @@ class MeetingClient {
         }
     }
 
+    // New methods for agenda interaction
+    async addAgendaItem(text) {
+        try {
+            const response = await fetch(`/api/meetings/${this.meetingId}/agenda`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text })
+            });
+            const data = await response.json();
+            if (data.status === 'success' && this.onStateUpdate) {
+                // Update local state if needed, or rely on WebSocket push
+                // For simplicity, we'll let the WS broadcast update the UI
+            } else {
+                console.error('Failed to add agenda item:', data);
+            }
+        } catch (error) {
+            console.error('Error adding agenda item:', error);
+        }
+    }
+
+    async updateAgendaItemStatus(itemId, completed) {
+        try {
+            const response = await fetch(`/api/meetings/${this.meetingId}/agenda/${itemId}/status`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ completed })
+            });
+            const data = await response.json();
+            if (data.status === 'success' && this.onStateUpdate) {
+                // Rely on WebSocket broadcast to update UI
+            } else {
+                console.error('Failed to update agenda item status:', data);
+            }
+        } catch (error) {
+            console.error('Error updating agenda item status:', error);
+        }
+    }
+
+
     disconnect() {
         this.stopRecording();
         if (this.ws) {
@@ -188,8 +227,9 @@ class MeetingClient {
  * Meeting Notes UI Renderer
  */
 class MeetingNotesRenderer {
-    constructor(containerId) {
+    constructor(containerId, onAgendaItemStatusChange) {
         this.container = document.getElementById(containerId);
+        this.onAgendaItemStatusChange = onAgendaItemStatusChange;
     }
 
     render(meeting) {
@@ -197,6 +237,7 @@ class MeetingNotesRenderer {
         
         // Check if we have any content to show
         const hasContent = meeting.summary || 
+                          meeting.agenda?.length > 0 ||
                           meeting.key_points?.length > 0 || 
                           meeting.decisions?.length > 0 || 
                           meeting.action_items?.length > 0 ||
@@ -208,6 +249,11 @@ class MeetingNotesRenderer {
                 <div class="empty-state">
                     <h2>Ready to Record</h2>
                     <p>Click "Start Recording" to begin capturing the meeting. Notes will be generated automatically every 30 seconds.</p>
+                    <p>You can also add agenda items below.</p>
+                    <div id="add-agenda-input-container" class="add-agenda-input-container">
+                        <input type="text" id="new-agenda-item-text" placeholder="Add an agenda item..." class="modal-input" />
+                        <button class="btn btn-record" onclick="addAgendaItemFromUI()">Add Item</button>
+                    </div>
                 </div>
             `;
             return;
@@ -215,6 +261,39 @@ class MeetingNotesRenderer {
         
         this.container.innerHTML = `
             <div class="meeting-notes">
+                ${meeting.agenda?.length > 0 ? `
+                    <section class="notes-section">
+                        <h2><span class="icon">✅</span> Agenda <span class="section-badge">${meeting.agenda.length}</span></h2>
+                        <ul class="agenda-list">
+                            ${meeting.agenda.map(item => `
+                                <li class="agenda-item ${item.completed ? 'completed' : ''}">
+                                    <input type="checkbox" id="agenda-item-${this._escape(item.id)}" 
+                                           data-id="${this._escape(item.id)}" 
+                                           ${item.completed ? 'checked' : ''}
+                                           onchange="handleAgendaCheckboxChange(this)" />
+                                    <label for="agenda-item-${this._escape(item.id)}">${this._escape(item.text)}</label>
+                                    ${item.completed_at ? `<span class="completed-at">Completed: ${formatDateTime(item.completed_at)}</span>` : ''}
+                                </li>
+                            `).join('')}
+                        </ul>
+                        <div id="add-agenda-input-container" class="add-agenda-input-container">
+                            <input type="text" id="new-agenda-item-text" placeholder="Add another agenda item..." class="modal-input" />
+                            <button class="btn btn-record" onclick="addAgendaItemFromUI()">Add Item</button>
+                        </div>
+                    </section>
+                ` : `
+                    <section class="notes-section">
+                        <h2><span class="icon">✅</span> Agenda</h2>
+                        <div class="empty-state-small">
+                            <p>No agenda items yet. Add some below!</p>
+                        </div>
+                        <div id="add-agenda-input-container" class="add-agenda-input-container">
+                            <input type="text" id="new-agenda-item-text" placeholder="Add an agenda item..." class="modal-input" />
+                            <button class="btn btn-record" onclick="addAgendaItemFromUI()">Add Item</button>
+                        </div>
+                    </section>
+                `}
+                
                 ${meeting.summary ? `
                     <section class="notes-section">
                         <h2><span class="icon">*</span> Summary</h2>
@@ -288,6 +367,11 @@ class MeetingNotesRenderer {
             </div>
         `;
         
+        // Attach event listeners for agenda checkboxes
+        this.container.querySelectorAll('.agenda-list input[type="checkbox"]').forEach(checkbox => {
+            checkbox.onchange = (event) => this.onAgendaItemStatusChange(event.target.dataset.id, event.target.checked);
+        });
+        
         // Auto-scroll transcript to bottom
         const transcriptEl = this.container.querySelector('.transcript-container');
         if (transcriptEl) {
@@ -330,4 +414,11 @@ class MeetingNotesRenderer {
 
 if (typeof module !== 'undefined') {
     module.exports = { MeetingClient, MeetingNotesRenderer };
+}
+
+// Global helper for rendering dates/times in agenda
+function formatDateTime(isoString) {
+    if (!isoString) return '';
+    const date = new Date(isoString);
+    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
 }

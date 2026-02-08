@@ -605,6 +605,81 @@
                 display: block;
             }
         }
+
+        /* Agenda specific styles */
+        .agenda-list {
+            list-style: none;
+            padding: 0;
+            margin-bottom: 15px;
+        }
+
+        .agenda-item {
+            display: flex;
+            align-items: center;
+            padding: 10px 12px;
+            background: #f9f9f9;
+            border: 1px solid #eee;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            transition: background 0.2s;
+        }
+
+        .agenda-item.completed {
+            background: #e6ffe6;
+            border-color: var(--primary);
+            text-decoration: line-through;
+            color: #666;
+        }
+
+        .agenda-item input[type="checkbox"] {
+            margin-right: 12px;
+            width: 18px;
+            height: 18px;
+            accent-color: var(--primary);
+            cursor: pointer;
+        }
+
+        .agenda-item label {
+            flex-grow: 1;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .agenda-item.completed label {
+            font-weight: normal;
+        }
+
+        .agenda-item .completed-at {
+            font-size: 11px;
+            color: #999;
+            margin-left: 10px;
+            white-space: nowrap;
+        }
+
+        .add-agenda-input-container {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .add-agenda-input-container .modal-input {
+            margin-bottom: 0; /* Override modal-input default margin */
+        }
+        
+        .empty-state p {
+            max-width: 400px;
+            margin: 0 auto;
+            margin-bottom: 20px; /* Added spacing to original empty-state p */
+        }
+
+        .empty-state-small { /* For empty agenda in notes section */
+            padding: 20px;
+            text-align: center;
+            color: #999;
+            background: #f8f8f8;
+            border-radius: 6px;
+            margin-bottom: 15px;
+        }
     </style>
 </head>
 <body>
@@ -691,7 +766,12 @@
         
         // Initialize
         document.addEventListener('DOMContentLoaded', async () => {
-            renderer = new MeetingNotesRenderer('meeting-container');
+            //renderer = new MeetingNotesRenderer('meeting-container');
+            renderer = new MeetingNotesRenderer('meeting-container', (itemId, completed) => {
+                if (client && currentMeetingId) {
+                    client.updateAgendaItemStatus(itemId, completed);
+                }
+            });
             await loadMeetingsList();
             
             // Check URL for meeting ID
@@ -961,6 +1041,45 @@
         window.onbeforeunload = () => {
             if (client) client.disconnect();
         };
+
+
+    // Global function for UI to add agenda item
+    function addAgendaItemFromUI() {
+        const inputElement = document.getElementById('new-agenda-item-text');
+        const text = inputElement.value.trim();
+        if (text && client && currentMeetingId) {
+            client.addAgendaItem(text);
+            inputElement.value = ''; // Clear input after adding
+            inputElement.focus();
+        }
+    }
+    
+    // Global function for UI to handle agenda checkbox change
+    function handleAgendaCheckboxChange(checkbox) {
+        const itemId = checkbox.dataset.id;
+        const completed = checkbox.checked;
+        if (client && currentMeetingId) {
+            client.updateAgendaItemStatus(itemId, completed);
+        }
+    }
+    
+    // Global helper for rendering dates/times in agenda
+    function formatDateTime(isoString) {
+        if (!isoString) return '';
+        const date = new Date(isoString);
+        return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+    }
+    
+    // Add event listener for "Enter" key on new agenda item input
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            const newAgendaInput = document.getElementById('new-agenda-item-text');
+            if (newAgendaInput && document.activeElement === newAgendaInput) {
+                e.preventDefault(); // Prevent form submission if any
+                addAgendaItemFromUI();
+            }
+        }
+    });
     </script>
 </body>
 </html>

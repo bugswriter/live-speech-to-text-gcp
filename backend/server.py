@@ -27,7 +27,7 @@ from google.cloud import speech
 from google.oauth2 import service_account
 from dotenv import load_dotenv
 
-from meeting_state import MeetingNoteManager, MeetingNote
+from meeting_state import MeetingNoteManager, MeetingNote, AgendaItem
 import database as db
 
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
@@ -300,12 +300,13 @@ async def list_meetings(limit: int = 50, offset: int = 0):
 
 
 @app.post("/api/meetings")
-async def create_meeting(data: dict = None):
+async def create_meeting(data: Optional[dict] = None):
     """Create a new meeting."""
     import uuid
     meeting_id = f"meeting-{uuid.uuid4().hex[:8]}"
     title = data.get("title", "Untitled Meeting") if data else "Untitled Meeting"
-    return db.create_meeting(meeting_id, title)
+    initial_agenda = data.get("agenda") if data else None # Pass initial agenda
+    return db.create_meeting(meeting_id, title, initial_agenda)
 
 
 @app.get("/api/meetings/{meeting_id}")
@@ -342,6 +343,52 @@ async def delete_meeting(meeting_id: str):
         raise HTTPException(status_code=404, detail="Meeting not found")
     
     return {"status": "deleted"}
+
+# New API endpoint for updating agenda item status
+@app.post("/api/meetings/{meeting_id}/agenda/{item_id}/status")
+async def update_agenda_item_status(meeting_id: str, item_id: str, data: dict):
+    """Update the completion status of an agenda item."""
+    session = active_meetings.get(meeting_id)
+    if not session:
+        # Load from DB if not active, update, then save
+        meeting_data = db.get_meeting(meeting_id)
+        if not meeting_data:
+            raise HTTPException(status_code=404, detail="Meeting not found")
+        
+        # Create a temporary manager to update agenda
+        temp_manager = MeetingNoteManager(meeting_id=meeting_id, initial_state=meeting_data)
+        temp_manager.update_agenda_item_status(item_id, data.get("completed", False))
+        db.update_meeting(meeting_id, temp_manager.to_dict())
+        # No broadcast needed if not active
+        return {"status": "success", "meeting": temp_manager.to_dict()}
+    
+    session.note_manager.update_agenda_item_status(item_id, data.get("completed", False))
+    await session.broadcast_state()
+    return {"status": "success", "meeting": session.note_manager.to_dict()}
+
+# New API endpoint for adding an agenda item
+@app.post("/api/meetings/{meeting_id}/agenda")
+async def add_agenda_item(meeting_id: str, data: dict):
+    """Add a new agenda item to the meeting."""
+    text = data.get("text")
+    if not text:
+        raise HTTPException(status_code=400, detail="Agenda item text is required.")
+
+    session = active_meetings.get(meeting_id)
+    if not session:
+        # Load from DB if not active, add, then save
+        meeting_data = db.get_meeting(meeting_id)
+        if not meeting_data:
+            raise HTTPException(status_code=404, detail="Meeting not found")
+        
+        temp_manager = MeetingNoteManager(meeting_id=meeting_id, initial_state=meeting_data)
+        temp_manager.add_agenda_item(text)
+        db.update_meeting(meeting_id, temp_manager.to_dict())
+        return {"status": "success", "meeting": temp_manager.to_dict()}
+    
+    session.note_manager.add_agenda_item(text)
+    await session.broadcast_state()
+    return {"status": "success", "meeting": session.note_manager.to_dict()}
 
 
 # ============ WebSocket ============
